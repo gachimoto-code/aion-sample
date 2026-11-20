@@ -1,0 +1,331 @@
+diff --git a/conversion/__init__.py b/conversion/__init__.py
+index 634cafa2..5f08bfb9 100644
+--- a/conversion/__init__.py
++++ b/conversion/__init__.py
+@@ -19,6 +19,7 @@ __all__ = [
+ TEXT_MODEL_MAP: dict[str, str] = {
+     "NEOChatModel": "sensenova_u1",
+     "AfmoeForCausalLM": "afmoe",
++    "AionInstructForCausalLM": "aion",
+     "LagunaForCausalLM": "laguna",
+     "RicursiveForCausalLM": "ricursive",
+     "FlintForCausalLM": "flint",
+diff --git a/conversion/aion.py b/conversion/aion.py
+new file mode 100644
+index 00000000..902da293
+--- /dev/null
++++ b/conversion/aion.py
+@@ -0,0 +1,17 @@
++from __future__ import annotations
++
++from .base import ModelBase, TextModel, gguf, logger
++
++
++@ModelBase.register("AionInstructForCausalLM")
++@ModelBase.example("microsoft/Aion-1.0-Instruct-2.3B")
++class AionModel(TextModel):
++    model_arch = gguf.MODEL_ARCH.AION
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++
++        layer_types = self.hparams["layer_types"]
++        self.gguf_writer.add_sliding_window(self.hparams["sliding_window"])
++        self.gguf_writer.add_sliding_window_pattern([t == "sliding_attention" for t in layer_types])
++        logger.info(f"gguf: sliding window pattern = {layer_types.count('sliding_attention')} of {len(layer_types)} layers")
+diff --git a/gguf-py/gguf/constants.py b/gguf-py/gguf/constants.py
+index e9e1866e..bb9ab6dd 100644
+--- a/gguf-py/gguf/constants.py
++++ b/gguf-py/gguf/constants.py
+@@ -768,6 +768,7 @@ class MODEL_ARCH(IntEnum):
+     KIMI_K31         = auto()
+     TALKIE           = auto()
+     MELLUM           = auto()
++    AION             = auto()
+     NANBEIGE         = auto()
+     QWEN3TTS         = auto()
+     POCKETTTS        = auto()
+@@ -1768,6 +1769,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
+     MODEL_ARCH.KIMI_K31:         "kimi-k31",
+     MODEL_ARCH.TALKIE:           "talkie",
+     MODEL_ARCH.MELLUM:           "mellum",
++    MODEL_ARCH.AION:             "aion",
+     MODEL_ARCH.NANBEIGE:         "nanbeige",
+     MODEL_ARCH.QWEN3TTS:         "qwen3tts",
+     MODEL_ARCH.POCKETTTS:        "pockettts",
+@@ -6876,6 +6878,22 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+         MODEL_TENSOR.NEXTN_HNORM,
+         MODEL_TENSOR.NEXTN_SHARED_HEAD_NORM,
+     ],
++    MODEL_ARCH.AION: [
++        MODEL_TENSOR.TOKEN_EMBD,
++        MODEL_TENSOR.OUTPUT_NORM,
++        MODEL_TENSOR.OUTPUT,
++        MODEL_TENSOR.ATTN_NORM,
++        MODEL_TENSOR.ATTN_Q,
++        MODEL_TENSOR.ATTN_Q_NORM,
++        MODEL_TENSOR.ATTN_K,
++        MODEL_TENSOR.ATTN_K_NORM,
++        MODEL_TENSOR.ATTN_V,
++        MODEL_TENSOR.ATTN_OUT,
++        MODEL_TENSOR.FFN_NORM,
++        MODEL_TENSOR.FFN_GATE,
++        MODEL_TENSOR.FFN_DOWN,
++        MODEL_TENSOR.FFN_UP,
++    ],
+     MODEL_ARCH.NANBEIGE: [
+         MODEL_TENSOR.TOKEN_EMBD,
+         MODEL_TENSOR.OUTPUT_NORM,
+diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
+index c50e9f98..7cf4544b 100644
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -173,6 +173,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+     { LLM_ARCH_GLM5_NEXT,        "glm5-next"        },
+     { LLM_ARCH_TALKIE,           "talkie"           },
+     { LLM_ARCH_MELLUM,           "mellum"           },
++    { LLM_ARCH_AION,             "aion"             },
+     { LLM_ARCH_NANBEIGE,         "nanbeige"         },
+     { LLM_ARCH_QWEN3TTS,         "qwen3tts"         },
+     { LLM_ARCH_POCKETTTS,        "pockettts"        },
+diff --git a/src/llama-arch.h b/src/llama-arch.h
+index 9c517a9f..5d8cfd55 100644
+--- a/src/llama-arch.h
++++ b/src/llama-arch.h
+@@ -171,6 +171,7 @@ enum llm_arch {
+     LLM_ARCH_GLM5_NEXT,
+     LLM_ARCH_TALKIE,
+     LLM_ARCH_MELLUM,
++    LLM_ARCH_AION,
+     LLM_ARCH_EAGLE3,
+     LLM_ARCH_MINIMAX_M3,
+     LLM_ARCH_DFLASH,
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index ac5266a4..8a885e8d 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -92,6 +92,8 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
+             return new llama_model_stablelm(params);
+         case LLM_ARCH_MELLUM:
+             return new llama_model_mellum(params);
++        case LLM_ARCH_AION:
++            return new llama_model_aion(params);
+         case LLM_ARCH_NANBEIGE:
+             return new llama_model_nanbeige(params);
+         case LLM_ARCH_QWEN:
+@@ -3869,6 +3871,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+         case LLM_ARCH_TALKIE:
+         case LLM_ARCH_K2_HORIZON:
+         case LLM_ARCH_MELLUM:
++        case LLM_ARCH_AION:
+         case LLM_ARCH_MAPLE:
+         case LLM_ARCH_HRM_TEXT:
+         case LLM_ARCH_BEAM:
+diff --git a/src/models/aion.cpp b/src/models/aion.cpp
+new file mode 100644
+index 00000000..e5ceedd0
+--- /dev/null
++++ b/src/models/aion.cpp
+@@ -0,0 +1,164 @@
++// Aion Instruct (Microsoft Windows Applied Sciences Group): dense decoder with per-head QK RMSNorm and
++// SwiGLU FFN (Qwen3 math), hybrid attention from layer_types (sliding-window and full-attention layers,
++// stored as a per-layer pattern), and per-layer-type RoPE: YaRN on full-attention layers, plain RoPE on
++// sliding-window layers. Tied input/output embeddings.
++
++#include "models.h"
++
++void llama_model_aion::load_arch_hparams(llama_model_loader & ml) {
++    ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
++    ml.get_arr(LLM_KV_ATTENTION_SLIDING_WINDOW_PATTERN, hparams.is_swa_impl);
++    ml.get_key(LLM_KV_ATTENTION_SLIDING_WINDOW, hparams.n_swa);
++    hparams.swa_type = LLAMA_SWA_TYPE_STANDARD;
++
++    // SWA layers use plain RoPE, no YaRN
++    hparams.rope_freq_base_train_swa  = hparams.rope_freq_base_train;
++    hparams.rope_freq_scale_train_swa = 1.0f;
++    ml.get_key(LLM_KV_ROPE_FREQ_BASE_SWA, hparams.rope_freq_base_train_swa, false);
++
++    switch (hparams.n_layer()) {
++        case 28: type = LLM_TYPE_2B; break;
++        default: type = LLM_TYPE_UNKNOWN;
++    }
++}
++
++void llama_model_aion::load_arch_tensors(llama_model_loader &) {
++    LLAMA_LOAD_LOCALS;
++
++    tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
++
++    // output
++    output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd}, 0);
++    output      = create_tensor(tn(LLM_TENSOR_OUTPUT,      "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
++    // if output is NULL, init from the input tok embed
++    if (output == NULL) {
++        output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
++    }
++
++    for (int i = 0; i < n_layer; ++i) {
++        auto & layer = layers[i];
++
++        layer.attn_norm = create_tensor(tn(LLM_TENSOR_ATTN_NORM, "weight", i), {n_embd}, 0);
++
++        create_tensor_qkv(layer, i, n_embd, n_embd_head_k * n_head, n_embd_gqa, n_embd_gqa, 0);
++        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd_head_k * n_head, n_embd}, 0);
++
++        layer.attn_k_norm = create_tensor(tn(LLM_TENSOR_ATTN_K_NORM, "weight", i), {n_embd_head_k}, 0);
++        layer.attn_q_norm = create_tensor(tn(LLM_TENSOR_ATTN_Q_NORM, "weight", i), {n_embd_head_k}, 0);
++
++        layer.ffn_norm = create_tensor(tn(LLM_TENSOR_FFN_NORM, "weight", i), {n_embd}, 0);
++        layer.ffn_gate = create_tensor(tn(LLM_TENSOR_FFN_GATE, "weight", i), {n_embd,   n_ff}, 0);
++        layer.ffn_down = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {  n_ff, n_embd}, 0);
++        layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff}, 0);
++    }
++}
++
++llama_rope_params llama_model_aion::get_rope_params(const llama_cparams & cparams, int il) const {
++    auto res = llama_model::get_rope_params(cparams, il);
++
++    if (hparams.is_swa(il)) {
++        res.ext_factor  = 0.0f;
++        res.attn_factor = 1.0f;
++    }
++
++    return res;
++}
++
++std::unique_ptr<llm_graph_context> llama_model_aion::build_arch_graph(const llm_graph_params & params) const {
++    return std::make_unique<graph>(params);
++}
++
++llama_model_aion::graph::graph(const llm_graph_params & params) : llm_graph_context(params) {
++    const int64_t n_embd_head = hparams.n_embd_head_v();
++
++    GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
++    GGML_ASSERT(n_embd_head == n_rot);
++
++    ggml_tensor * cur;
++    ggml_tensor * inpL;
++
++    inpL = build_inp_embd(model.tok_embd);
++
++    // inp_pos - contains the positions
++    ggml_tensor * inp_pos = build_inp_pos();
++
++    auto * inp_attn = build_attn_inp_kv_iswa();
++
++    ggml_tensor * inp_out_ids = build_inp_out_ids();
++
++    for (int il = 0; il < n_layer; ++il) {
++        ggml_tensor * inpSA = inpL;
++
++        // norm
++        cur = build_norm(inpL,
++                model.layers[il].attn_norm, NULL,
++                LLM_NORM_RMS, il);
++        cb(cur, "attn_norm", il);
++
++        // self-attention
++        {
++            // compute Q and K and RoPE them
++            auto [Qcur, Kcur, Vcur] = build_qkv(model.layers[il], cur,
++                    n_embd_head, n_head, n_head_kv, il);
++
++            Qcur = build_norm(Qcur, model.layers[il].attn_q_norm, NULL, LLM_NORM_RMS, il);
++            cb(Qcur, "Qcur_normed", il);
++
++            Kcur = build_norm(Kcur, model.layers[il].attn_k_norm, NULL, LLM_NORM_RMS, il);
++            cb(Kcur, "Kcur_normed", il);
++
++            Qcur = build_rope(Qcur, inp_pos, il);
++            Kcur = build_rope(Kcur, inp_pos, il);
++
++            cb(Qcur, "Qcur", il);
++            cb(Kcur, "Kcur", il);
++            cb(Vcur, "Vcur", il);
++
++            cur = build_attn(inp_attn,
++                    model.layers[il].wo, model.layers[il].wo_b, model.layers[il].wo_s,
++                    Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, 1.0f/sqrtf(float(n_embd_head)), il);
++        }
++        if (il == n_layer - 1 && inp_out_ids) {
++            cur   = ggml_get_rows(ctx0,   cur, inp_out_ids);
++            inpSA = ggml_get_rows(ctx0, inpSA, inp_out_ids);
++        }
++        ggml_tensor * ffn_inp = ggml_add(ctx0, cur, inpSA);
++        cb(ffn_inp, "ffn_inp", il);
++
++        // feed-forward network
++        cur = build_norm(ffn_inp,
++                model.layers[il].ffn_norm, NULL,
++                LLM_NORM_RMS, il);
++        cb(cur, "ffn_norm", il);
++
++        cur = build_ffn(cur,
++                model.layers[il].ffn_up,   NULL, model.layers[il].ffn_up_s,
++                model.layers[il].ffn_gate, NULL, model.layers[il].ffn_gate_s,
++                model.layers[il].ffn_down, NULL, model.layers[il].ffn_down_s,
++                NULL,
++                LLM_FFN_SILU, LLM_FFN_PAR, il);
++        cb(cur, "ffn_out", il);
++
++        cur = ggml_add(ctx0, cur, ffn_inp);
++
++        cur = build_cvec(cur, il);
++        cb(cur, "l_out", il);
++
++        // input for next layer
++        inpL = cur;
++    }
++    cur = inpL;
++
++    cur = build_norm(cur,
++            model.output_norm, NULL,
++            LLM_NORM_RMS, -1);
++
++    cb(cur, "result_norm", -1);
++    res->t_embd = cur;
++
++    // lm_head
++    cur = build_lora_mm(model.output, cur, model.output_s);
++
++    cb(cur, "result_output", -1);
++    res->t_logits = cur;
++}
+diff --git a/src/models/models.h b/src/models/models.h
+index 8d74c501..7ad37909 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -419,6 +419,19 @@ struct llama_model_stablelm : public llama_model_base {
+     std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
+ };
+ 
++struct llama_model_aion : public llama_model_base {
++    llama_model_aion(const struct llama_model_params & params) : llama_model_base(params) {}
++    void load_arch_hparams(llama_model_loader & ml) override;
++    void load_arch_tensors(llama_model_loader & ml) override;
++
++    struct graph : public llm_graph_context {
++        graph(const llm_graph_params & params);
++    };
++
++    llama_rope_params get_rope_params(const llama_cparams & cparams, int il) const override;
++    std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
++};
++
+ struct llama_model_mellum : public llama_model_base {
+     llama_model_mellum(const struct llama_model_params & params) : llama_model_base(params) {}
+     void load_arch_hparams(llama_model_loader & ml) override;
+diff --git a/tests/test-llama-archs.cpp b/tests/test-llama-archs.cpp
+index f10404e8..111b4ed9 100644
+--- a/tests/test-llama-archs.cpp
++++ b/tests/test-llama-archs.cpp
+@@ -496,7 +496,8 @@ static gguf_context_ptr get_gguf_ctx(const llm_arch arch, const bool moe, const
+         ms.add_kv(LLM_KV_ATTENTION_SLIDING_WINDOW_PATTERN, pattern);
+     } else if (arch == LLM_ARCH_COHERE2MOE || arch == LLM_ARCH_MIMO2 || arch == LLM_ARCH_STEP35 || arch == LLM_ARCH_SPARK2_5 ||
+             arch == LLM_ARCH_MUSE_GLIMMER || arch == LLM_ARCH_MUSE_SPARK || arch == LLM_ARCH_GRANITE_SWA || arch == LLM_ARCH_DOTS3NOTE ||
+-            arch == LLM_ARCH_KOLIBRI1 || arch == LLM_ARCH_MAPLE || arch == LLM_ARCH_FLINT || arch == LLM_ARCH_BEAM || arch == LLM_ARCH_RICURSIVE) {
++            arch == LLM_ARCH_KOLIBRI1 || arch == LLM_ARCH_MAPLE || arch == LLM_ARCH_FLINT || arch == LLM_ARCH_BEAM || arch == LLM_ARCH_RICURSIVE ||
++            arch == LLM_ARCH_AION) {
+         std::vector<uint32_t> pattern;
+         pattern.reserve(n_layer);
+         for (uint32_t il = 0; il < n_layer; il++) {

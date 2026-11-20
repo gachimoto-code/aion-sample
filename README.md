@@ -16,13 +16,22 @@ Mac 上でローカル実行してブラウザからチャットするための�
 
 ## Mac でのセットアップ
 
-前提: macOS (Apple Silicon)、Node.js 20+、Homebrew。
+前提: macOS (Apple Silicon)、Node.js 20+、Homebrew、cmake（`brew install cmake`）。
 
-### 1. llama.cpp を入れる
+### 1. パッチ版 llama.cpp をビルドする
+
+Aion は独自アーキテクチャ（`aion`）のため、上流の llama.cpp（Homebrew 版や Ollama 等）では
+`unknown model architecture: 'aion'` となって読み込めません。
+GGUF 配布元の AtomicChat が用意した対応パッチ（`llama.cpp/aion-port.patch`）を
+指定コミットの llama.cpp に当ててビルドします（所要は数分程度）。
 
 ```bash
-brew install llama.cpp
+bash scripts/build-llama-mac.sh
 ```
+
+成果物は `.llama-src/llama.cpp-<commit>/build/bin/llama-server` です。
+この手順は 2026-11-20 に Linux 上で検証済みです（同パッチ・同コミットでビルドし、
+日本語の要約・書き直し・質問応答が動作することを確認）。
 
 ### 2. モデル（GGUF）をダウンロードする
 
@@ -40,7 +49,7 @@ mkdir -p models
 ### 3. llama-server を起動する（ターミナル1）
 
 ```bash
-llama-server -m models/<ダウンロードしたファイル>.gguf --host 127.0.0.1 --port 8080 -c 8192
+.llama-src/llama.cpp-*/build/bin/llama-server -m models/Aion-1.0-Instruct-2.3B-AD-Q4_K_M.gguf --host 127.0.0.1 --port 8080 -c 8192
 ```
 
 ブラウザで http://127.0.0.1:8080 を開いて llama.cpp の画面が出れば起動OKです。
@@ -84,4 +93,5 @@ http://localhost:5173 を開くとチャット画面が出ます。
 
 - Aion 1.0 Instruct は要約・書き直し・文書理解・質問応答を想定した小型モデルです。長い推論や複雑な指示には向きません。
 - GGUF はコミュニティ変換版です。変換元は公式モデル（MIT）ですが、配布物の完全性は各自で確認してください。
+- llama.cpp 本体へ上流対応が入れば、パッチ版ビルドは不要になります（2026-11-20 時点では未対応）。
 - 2027年1月末までに、Microsoft が最適化版を Windows OS へ標準搭載する予定と発表しています（このサンプルは Mac 用です）。

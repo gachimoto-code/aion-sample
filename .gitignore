@@ -5,3 +5,4 @@ dist/
 !.env.example
 *.gguf
 models/
+.llama-src/
