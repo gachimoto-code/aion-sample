@@ -39,11 +39,12 @@ bash scripts/build-llama-mac.sh
 llama.cpp 用にはコミュニティ変換の GGUF を使います。
 
 - 配布元: https://huggingface.co/AtomicChat/Aion-1.0-Instruct-2.3B-GGUF
+- 直接: https://huggingface.co/AtomicChat/Aion-1.0-Instruct-2.3B-GGUF/resolve/main/Aion-1.0-Instruct-2.3B-AD-Q4_K_M.gguf
 - `Q4_K_M` のファイル（約1.4GB）を選んでダウンロードし、このフォルダ直下の `models/` に置く
 
 ```bash
 mkdir -p models
-# ブラウザで上記ページから Q4_K_M の .gguf をダウンロードして models/ へ
+# 上記の直接リンクからダウンロードして models/ へ
 ```
 
 ### 3. llama-server を起動する（ターミナル1）
