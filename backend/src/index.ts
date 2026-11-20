@@ -36,7 +36,17 @@ app.get("/api/health", async (_req: Request, res: Response) => {
   } catch (e) {
     llama = { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-  res.json({ ok: true, model: MODEL_NAME, llamaBaseUrl: LLAMA_BASE_URL, llama });
+  res.json({
+    ok: true,
+    model: MODEL_NAME,
+    backend: "express-llama.cpp",
+    ready: llama.ok,
+    detail: llama.ok
+      ? `llama-server: ${LLAMA_BASE_URL}`
+      : (llama.error ?? "llama-server に接続できません"),
+    llamaBaseUrl: LLAMA_BASE_URL,
+    llama,
+  });
 });
 
 // Chat: forwards the conversation to llama-server and streams the reply

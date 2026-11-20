@@ -3,16 +3,19 @@
 Microsoft の小型LLM「Aion 1.0 Instruct」（2.3B、日本語対応、MITライセンス）を、
 Mac 上でローカル実行してブラウザからチャットするためのサンプルです。
 
-構成は3層で、文章は端末の外に出ません。
+バックエンドは2種類あり、フロントエンドは共通です。文章は端末の外に出ません。
 
 ```
-ブラウザ (React)  →  Express バックエンド  →  llama-server (llama.cpp) + Aion GGUF
-   :5173                :3001                    :8080
+A) Express版:  ブラウザ (React) → Express → llama-server (llama.cpp) + Aion GGUF
+                  :5173            :3001        :8080
+B) Python版:   ブラウザ (React) → FastAPI (Transformers が公式モデルを直接実行)
+                  :5173            :3002
 ```
 
 - frontend/ … Vite + React + TypeScript のチャットUI（ストリーミング表示、試し文ボタン付き）
 - backend/ … Express + TypeScript。llama-server の OpenAI 互換APIへ中継し、SSEで返す
-- モデル実行 … llama.cpp の llama-server が GGUF を読み込む（Apple Silicon は Metal で高速化）
+- backend-python/ … FastAPI + PyTorch/Transformers。公式モデルをそのまま実行する（llama.cpp 不要）
+- モデル実行A … llama.cpp の llama-server が GGUF を読み込む（Apple Silicon は Metal で高速化）
 
 ## Mac でのセットアップ
 
@@ -73,8 +76,35 @@ npm run dev            # http://localhost:5173
 ```
 
 http://localhost:5173 を開くとチャット画面が出ます。
-画面上部のステータスが「llama-server 接続OK」になっていれば準備完了です。
+画面上部のステータスが「モデルサーバー接続OK」になっていれば準備完了です。
 試し文ボタン（要約・書き直し・質問応答）か、入力欄から日本語で話しかけてください（⌘+Enter で送信）。
+
+## Python版バックエンド（llama.cpp 不要）
+
+Express版の代わりに、公式モデルを Transformers で直接実行する Python版も用意しています。
+GGUF のダウンロードも、パッチ版 llama.cpp のビルドも不要です（モデルは初回起動時に
+Hugging Face から自動でダウンロードされます。約4.6GB）。
+
+```bash
+cd backend-python
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # 既定値のままでOK
+python main.py         # http://localhost:3002（モデル読み込みに初回は数分）
+```
+
+フロントエンドは接続先を環境変数で切り替えて起動します（ターミナルを分ける）。
+
+```bash
+cd frontend
+VITE_API_PROXY=http://localhost:3002 npm run dev
+```
+
+- Apple Silicon では MPS（float16）で実行します。CPU のみの環境では float32 で動きますが低速です
+- 設定は backend-python/.env（PORT / MODEL_ID / AION_DTYPE）
+- API は Express版と互換（/api/health、/api/chat の SSE 形式は同一）
+- 検証状況（2026-11-20）：公式モデルの remote code・config・tokenizer・チャットテンプレートと
+  FastAPI の配線は Linux 上で確認済み。実モデル（約4.6GB）での生成確認は Mac (MPS) 側でお願いします
 
 ## 設定（backend/.env）
 

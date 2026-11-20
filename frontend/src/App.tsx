@@ -8,7 +8,9 @@ type Message = {
 type Health = {
   ok: boolean;
   model?: string;
-  llama?: { ok: boolean; models?: string[]; error?: string };
+  backend?: string;
+  ready?: boolean;
+  detail?: string;
 };
 
 const SAMPLE_PROMPTS = [
@@ -97,21 +99,22 @@ export default function App() {
     }
   }
 
-  const llamaOk = health?.llama?.ok === true;
+  const llamaOk = health?.ready === true;
 
   return (
     <div className="app">
       <header>
         <h1>Aion 1.0 Instruct ローカルチャット</h1>
         <p className="sub">
-          Microsoft の小型LLM（2.3B）を Mac 上の llama.cpp で動かすサンプル。文章は端末の外に出ません。
+          Microsoft の小型LLM（2.3B）を Mac 上でローカル実行するサンプル。文章は端末の外に出ません。
         </p>
         <p className={llamaOk ? "status ok" : "status ng"}>
           {health === null
             ? "接続確認中…"
             : llamaOk
-              ? `llama-server 接続OK（${health?.model ?? "aion"}）`
-              : "llama-server に接続できません。README の手順で起動してください"}
+              ? `モデルサーバー接続OK（${health?.model ?? "aion"}）`
+              : (health?.detail ??
+                "モデルサーバーに接続できません。README の手順で起動してください")}
         </p>
       </header>
 
