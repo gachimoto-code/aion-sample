@@ -123,11 +123,15 @@ onnxruntime-genai で実行する版です。3つのバックエンドの中で�
 
 ```bash
 cd backend-onnx
-python3 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # 既定値のままでOK
 python main.py         # http://localhost:3003（モデル読み込みに初回は数分）
 ```
+
+注意：onnxruntime-genai の wheel は Python 3.12／3.13 用までで、3.15 用は
+まだ配布されていません。venv は必ず python3.12（無ければ `brew install python@3.12`）
+で作ってください。
 
 フロントエンドの接続先は frontend/.env の VITE_API_PROXY を
 http://localhost:3003 に書き換えます。
