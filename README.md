@@ -93,12 +93,16 @@ cp .env.example .env   # 既定値のままでOK
 python main.py         # http://localhost:3002（モデル読み込みに初回は数分）
 ```
 
-フロントエンドは接続先を環境変数で切り替えて起動します（ターミナルを分ける）。
+フロントエンドは接続先を frontend/.env で切り替えます。
 
 ```bash
 cd frontend
-VITE_API_PROXY=http://localhost:3002 npm run dev
+cp .env.example .env
+# .env の VITE_API_PROXY を http://localhost:3002 に書き換える
+npm run dev
 ```
+
+（Express版に繋ぐ場合は既定の http://localhost:3001 のままでOKです）
 
 - Apple Silicon では MPS（float16）で実行します。CPU のみの環境では float32 で動きますが低速です
 - 設定は backend-python/.env（PORT / MODEL_ID / AION_DTYPE）
