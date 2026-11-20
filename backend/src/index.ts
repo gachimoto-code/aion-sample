@@ -46,6 +46,8 @@ app.get("/api/health", async (_req: Request, res: Response) => {
       : (llama.error ?? "llama-server に接続できません"),
     llamaBaseUrl: LLAMA_BASE_URL,
     llama,
+    // llama.cpp 側のダウンロード進捗は取得できないため null（フロントは文言のみ表示）
+    progress: null,
   });
 });
 

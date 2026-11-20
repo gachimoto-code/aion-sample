@@ -93,6 +93,8 @@ cp .env.example .env   # 既定値のままでOK
 python main.py         # http://localhost:3002（モデル読み込みに初回は数分）
 ```
 
+Python版バックエンドは、初回のモデルダウンロード／読み込みの進捗を /api/health の progress フィールドで返し、フロントエンドにプログレスバー（％と取得済み容量）で表示します。Express版は進捗を返さないため、状態文言のみの表示になります。
+
 フロントエンドは接続先を frontend/.env で切り替えます。
 
 ```bash

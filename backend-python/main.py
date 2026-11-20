@@ -39,8 +39,76 @@ _state = {
 }
 _load_done = threading.Event()
 
+# フロントエンドの進捗表示用（/api/health の progress フィールド）
+_progress = {
+    "stage": "downloading",  # downloading / loading / ready / error
+    "downloadedBytes": 0,
+    "totalBytes": None,
+    "percent": None,
+}
+
+
+def _cache_dir_bytes() -> int:
+    """HF キャッシュ内のこのモデルの実ファイル合計サイズ（ダウンロード進捗の近似）。"""
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+
+        root = os.path.join(HF_HUB_CACHE, "models--" + MODEL_ID.replace("/", "--"))
+        total = 0
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+        return total
+    except Exception:
+        return 0
+
+
+def _fetch_total_bytes() -> None:
+    """HF API でリポジトリの全ファイル合計サイズを取得し、進捗の分母にする。"""
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(MODEL_ID, files_metadata=True)
+        total = sum(s.size or 0 for s in (info.siblings or []))
+        if total > 0:
+            _progress["totalBytes"] = total
+    except Exception:
+        pass  # 取得できなくても読み込み自体は続ける（percent は null のまま）
+
+
+def _monitor_download() -> None:
+    import time
+
+    last_size = -1
+    stable_polls = 0
+    while not _load_done.is_set():
+        size = _cache_dir_bytes()
+        _progress["downloadedBytes"] = size
+        total = _progress["totalBytes"]
+        if total:
+            _progress["percent"] = round(min(100.0, size / total * 100), 1)
+        # ダウンロード完了の目安: 合計が分かれば 99% 到達で読み込み段階へ。
+        # 合計不明の場合のみ「サイズが数秒変わらない」を完了の目安にする
+        # （回線が止まっているだけの状態を「読み込み中」と誤表示しないため）。
+        if total and size >= total * 0.99:
+            if _progress["stage"] == "downloading":
+                _progress["stage"] = "loading"
+        elif not total and size == last_size and size > 0:
+            stable_polls += 1
+            if stable_polls >= 3 and _progress["stage"] == "downloading":
+                _progress["stage"] = "loading"
+        else:
+            stable_polls = 0
+        last_size = size
+        time.sleep(1)
+
 
 def _load_model() -> None:
+    _fetch_total_bytes()
+    threading.Thread(target=_monitor_download, daemon=True).start()
     try:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -70,9 +138,11 @@ def _load_model() -> None:
         _state.update(
             status="ready", model=model, tokenizer=tokenizer, device=device, error=None
         )
+        _progress.update(stage="ready", percent=100.0)
         print(f"[aion-python] model loaded on {device} ({dtype})")
     except Exception as e:  # noqa: BLE001
         _state.update(status="error", error=f"{type(e).__name__}: {e}")
+        _progress.update(stage="error")
         print(f"[aion-python] model load failed: {e}")
     finally:
         _load_done.set()
@@ -118,6 +188,7 @@ def health() -> dict:
             if _state["status"] == "error"
             else "モデル読み込み中（初回はダウンロードのため数分かかります）"
         ),
+        "progress": dict(_progress),
     }
 
 

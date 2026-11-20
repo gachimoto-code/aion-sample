@@ -5,13 +5,25 @@ type Message = {
   content: string;
 };
 
+type Progress = {
+  stage: string; // downloading / loading / ready / error
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+};
+
 type Health = {
   ok: boolean;
   model?: string;
   backend?: string;
   ready?: boolean;
   detail?: string;
+  progress?: Progress | null;
 };
+
+function fmtGB(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(2)}GB`;
+}
 
 const SAMPLE_PROMPTS = [
   "次の文を3行に要約して： 人工知能の発展により、文章の要約や翻訳といった作業は急速に自動化が進んでいる。特に大規模言語モデルは、大量のテキストを短時間で処理できるため、業務効率化の手段として注目されている。一方で、生成された文章の正確さを人間が確認する工程は依然として重要であり、完全な自動化には課題も残る。",
@@ -27,11 +39,32 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // 起動直後はモデルのダウンロード／読み込みが終わるまでポーリングして進捗を表示する
   useEffect(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((data: Health) => setHealth(data))
-      .catch(() => setHealth({ ok: false }));
+    let stopped = false;
+    let timer: number | undefined;
+    const poll = () => {
+      fetch("/api/health")
+        .then((r) => r.json())
+        .then((data: Health) => {
+          if (stopped) return;
+          setHealth(data);
+          if (data.ready !== true && data.progress?.stage !== "error") {
+            timer = window.setTimeout(poll, 2000);
+          }
+        })
+        .catch(() => {
+          if (!stopped) {
+            setHealth({ ok: false });
+            timer = window.setTimeout(poll, 3000);
+          }
+        });
+    };
+    poll();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -116,6 +149,36 @@ export default function App() {
               : (health?.detail ??
                 "モデルサーバーに接続できません。README の手順で起動してください")}
         </p>
+        {!llamaOk && health?.progress && health.progress.stage !== "error" && (
+          <div className="progress">
+            <div className="progress-track">
+              <div
+                className={
+                  health.progress.percent === null
+                    ? "progress-bar indeterminate"
+                    : "progress-bar"
+                }
+                style={
+                  health.progress.percent === null
+                    ? undefined
+                    : { width: `${health.progress.percent}%` }
+                }
+              />
+            </div>
+            <p className="progress-text">
+              {health.progress.stage === "loading"
+                ? "モデルを読み込み中…"
+                : "モデルをダウンロード中…"}
+              {health.progress.percent !== null &&
+                ` ${health.progress.percent.toFixed(0)}%`}
+              {health.progress.totalBytes !== null
+                ? `（${fmtGB(health.progress.downloadedBytes)} / ${fmtGB(health.progress.totalBytes)}）`
+                : health.progress.downloadedBytes > 0
+                  ? `（${fmtGB(health.progress.downloadedBytes)} 取得済み）`
+                  : ""}
+            </p>
+          </div>
+        )}
       </header>
 
       <main>
