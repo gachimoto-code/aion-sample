@@ -15,6 +15,7 @@ API は Express 版と互換:
 import json
 import os
 import threading
+from contextlib import asynccontextmanager
 from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
@@ -28,14 +29,6 @@ load_dotenv()
 MODEL_ID = os.getenv("MODEL_ID", "microsoft/Aion-1.0-Instruct-2.3B")
 PORT = int(os.getenv("PORT", "3002"))
 DTYPE_ENV = os.getenv("AION_DTYPE", "").lower()  # "float16" / "bfloat16" / "float32"
-
-app = FastAPI(title="aion-sample backend (python)")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 _state = {
     "status": "loading",  # loading / ready / error
@@ -85,9 +78,19 @@ def _load_model() -> None:
         _load_done.set()
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
     threading.Thread(target=_load_model, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="aion-sample backend (python)", lifespan=_lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ChatMessage(BaseModel):
