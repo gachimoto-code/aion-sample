@@ -3,18 +3,21 @@
 Microsoft の小型LLM「Aion 1.0 Instruct」（2.3B、日本語対応、MITライセンス）を、
 Mac 上でローカル実行してブラウザからチャットするためのサンプルです。
 
-バックエンドは2種類あり、フロントエンドは共通です。文章は端末の外に出ません。
+バックエンドは3種類あり、フロントエンドは共通です。文章は端末の外に出ません。
 
 ```
 A) Express版:  ブラウザ (React) → Express → llama-server (llama.cpp) + Aion GGUF
                   :5173            :3001        :8080
 B) Python版:   ブラウザ (React) → FastAPI (Transformers が公式モデルを直接実行)
                   :5173            :3002
+C) ONNX版:     ブラウザ (React) → FastAPI (onnxruntime-genai が公式ONNXモデルを実行)
+                  :5173            :3003
 ```
 
 - frontend/ … Vite + React + TypeScript のチャットUI（ストリーミング表示、試し文ボタン付き）
 - backend/ … Express + TypeScript。llama-server の OpenAI 互換APIへ中継し、SSEで返す
 - backend-python/ … FastAPI + PyTorch/Transformers。公式モデルをそのまま実行する（llama.cpp 不要）
+- backend-onnx/ … FastAPI + onnxruntime-genai。公式ONNX版（int4、約1.3GB）を実行する
 - モデル実行A … llama.cpp の llama-server が GGUF を読み込む（Apple Silicon は Metal で高速化）
 
 ## Mac でのセットアップ
@@ -109,8 +112,32 @@ npm run dev
 - Apple Silicon では MPS（float16）で実行します。CPU のみの環境では float32 で動きますが低速です
 - 設定は backend-python/.env（PORT / MODEL_ID / AION_DTYPE）
 - API は Express版と互換（/api/health、/api/chat の SSE 形式は同一）
-- 検証状況（2026-11-20）：公式モデルの remote code・config・tokenizer・チャットテンプレートと
-  FastAPI の配線は Linux 上で確認済み。実モデル（約4.6GB）での生成確認は Mac (MPS) 側でお願いします
+- 検証状況（2026-11-20）：Mac (MPS) での実モデル生成まで動作確認済み
+
+## ONNX版バックエンド（onnxruntime-genai）
+
+公式の ONNX 版（microsoft/Aion-1.0-Instruct-2.3B-ONNX-WebGPU、int4 量子化）を
+onnxruntime-genai で実行する版です。3つのバックエンドの中で最も軽く、モデルは
+約1.3GB、PyTorch も llama.cpp も不要です。genai_config.json の provider_options が
+空のため、Mac では CPU 実行になります（ダウンロード／読み込みの進捗表示にも対応）。
+
+```bash
+cd backend-onnx
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # 既定値のままでOK
+python main.py         # http://localhost:3003（モデル読み込みに初回は数分）
+```
+
+フロントエンドの接続先は frontend/.env の VITE_API_PROXY を
+http://localhost:3003 に書き換えます。
+
+- 設定は backend-onnx/.env（PORT / MODEL_ID / MODEL_DIR）
+- MODEL_DIR に genai_config.json のあるフォルダを指定すると、ダウンロード済みの
+  モデルをそのまま使えます
+- API は他版と互換（/api/health、/api/chat の SSE 形式は同一）
+- 検証状況（2026-11-20）：Linux (CPU) で実モデルの読み込みと日本語生成
+  （SSEストリーミング）まで動作確認済み
 
 ## 設定（backend/.env）
 
